@@ -57,7 +57,11 @@ class Application
 
   def self.main
 
-    unless File.directory? volume = File.expand_path( ARGV[ 0 ].to_s ) + '/VIDEO_TS'
+    if File.directory? volume = File.expand_path( ARGV[ 0 ].to_s ) + '/VIDEO_TS'
+
+      ARGV.shift
+
+    else
 
       volumes = Disc.list_of_volumes
       abort "Could not find any DVD video volumes" if volumes.length == 0
@@ -86,8 +90,16 @@ class Application
     puts "Which is the first episode on this disc?"
     first_episode = ( readline 1..100, same_season_as_before ? Persist[ :episode ].to_i + 1 : 1 ).to_i
 
-    puts "Try to embed foreign-language subtitles?"
+    puts "Try to include foreign-language subtitles?"
     Persist[ :foreign_subs ] = foreign_subs = confirm( Persist[ :foreign_subs ] || false )
+
+    puts "Apply motion-sensing decomb filter (for video-based sources)?"
+    Persist[ :decomb ] = decomb = choose([
+      'Off',
+      'Automatic',
+      'Upper field first (NTSC)',
+      'Lower field first (PAL)'
+    ], Persist[ :decomb ] || 1)
 
     if Iflicks.installed?
       puts "Add episodes to iFlicks?"
@@ -138,7 +150,7 @@ class Application
     episodes.each_with_index do |episode, index|
       filename = '%s S%02dE%02d.mp4' % [ show_title, season, first_episode + index ]
       puts 'Creating %s' % filename
-      Handbrake.rip episode, filename, foreign_subs
+      Handbrake.rip episode, filename, :foreign_subs => foreign_subs, :decomb => decomb
       Iflicks << File.expand_path( filename )
     end
 
@@ -409,19 +421,23 @@ class Handbrake
 
   abort "Could not find HandBrakeCLI executable" unless File.executable? @@executable_path
 
-  def self.exec args
+  def self.exec args, display = false
     cmd = Shellwords.shellescape @@executable_path
     args.each { |key, value| cmd += " --%s %s" % [ key, value == true ? '' : Shellwords.shellescape( value.to_s ) ] if value }
+    cmd += ARGV.map{ |x| ' ' + Shellwords.shellescape( x ) }.join unless ARGV.empty?
     if block_given?
       IO.popen( cmd + ' 2>&1' ).each_line { |line| yield line }
-    else
+    elsif display
       AnsiEscape.colour :foreground => :green
-      system cmd + ' 2> /dev/null'
+      result = system cmd + ' 2> /dev/null'
       AnsiEscape.colour :reset
+      abort 'Command failed or was aborted' unless result
+    else
+      IO.popen( cmd + ' 2> /dev/null' ).read
     end
   end
 
-  def self.rip episode, output_file, foreign_subs = false
+  def self.rip episode, output_file, options
     args = Application::ENCODING_DEFAULTS.merge( {
       :input => episode.disc.path,
       :title => episode.disc.titles[ episode.title - 1 ].number,
@@ -431,13 +447,14 @@ class Handbrake
       :subtitle => 'scan',
       :'subtitle-burn' => true,
       :'native-lang' => 'eng'
-    } ) if foreign_subs
+    } ) if options[ :foreign_subs ]
+    args[ :decomb ] = /--decomb[\s\S]+?default: ([-:\d]+:)/.match( exec :help => true )[ 1 ] + ( options[ :decomb ] - 2 ).to_s if options[ :decomb ] && options[ :decomb ] > 0
     args[ :chapters ] = if episode.chapters.respond_to? :first
       '%s-%s' % [ episode.chapters.first, episode.chapters.last ]
     else
       episode.chapters
     end if episode.chapters
-    exec args
+    exec args, true
   end
 
 end
@@ -447,7 +464,7 @@ class Iflicks
   COMMAND_TEMPLATE = 'osascript' + '
 
 tell application "iFlicks"
-import "%s" as iTunes compatible with%s gui
+import "%s" as iTunes compatible with%s gui with deleting
 end tell
 
   '.strip.split( "\n" ).map{ |line| " -e '%s'" % line }.join
