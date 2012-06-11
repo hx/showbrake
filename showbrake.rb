@@ -13,20 +13,35 @@ class Application
   EPISODE_DURATION_DEVIATION = 0.25
 
   ENCODING_DEFAULTS = {
-    :encoder => 'x264',
-    :quality => 23,
-    :optimize => true,
-    :audio => '1,1',
-    :aencoder => 'faac,copy:ac3',
-    :ab => '160,160',
-    :mixdown => 'dpl2,auto',
-    :arate => 'auto,auto',
-    :drc => '0.0,0.0',
-    :format => 'mp4',
-    :maxWidth => 720,
-    :'loose-anamorphic' => true,
-    :encopts => 'cabac=0:ref=2:me=umh:bframes=0:weightp=0:8x8dct=0:trellis=0:subme=6',
-    :markers => true
+
+    :common => {
+      :encoder => 'x264',
+      :optimize => true,
+      :audio => '1,1',
+      :aencoder => 'faac,copy:ac3',
+      :ab => '160,160',
+      :mixdown => 'dpl2,auto',
+      :arate => 'auto,auto',
+      :drc => '0.0,0.0',
+      :format => 'mp4',
+      :'loose-anamorphic' => true,
+      :markers => true
+    },
+
+    :dvd => {
+      :quality => 23,
+      :maxWidth => 720,
+      :encopts => 'cabac=0:ref=2:me=umh:bframes=0:weightp=0:8x8dct=0:trellis=0:subme=6',
+    },
+
+    :bluray => {
+      :quality => 21.5,
+      :maxWidth => 1280,
+      :'large-file' => true,
+      :rate => 29.97,
+      :pfr => true
+    }
+    
   }
 
   def self.readline valid_pattern, default = nil
@@ -57,21 +72,23 @@ class Application
 
   def self.main
 
-    if File.directory? volume = File.expand_path( ARGV[ 0 ].to_s ) + '/VIDEO_TS'
+    if media_type = Disc.media_type( ARGV[ 0 ].to_s )
 
-      ARGV.shift
+      volume = File.expand_path ARGV.shift.to_s
 
     else
 
       volumes = Disc.list_of_volumes
-      abort "Could not find any DVD video volumes" if volumes.length == 0
+      abort "Could not find any DVD or Blu-ray video volumes" if volumes.length == 0
 
       volume = '/Volumes/' + if volumes.length > 1
         puts "Which disc would you like to rip?"
         volumes[ choose volumes ]
       else
         volumes[ 0 ]
-      end + '/VIDEO_TS'
+      end
+
+      media_type = Disc.media_type volume
 
     end
 
@@ -90,16 +107,20 @@ class Application
     puts "Which is the first episode on this disc?"
     first_episode = ( readline 1..100, same_season_as_before ? Persist[ :episode ].to_i + 1 : 1 ).to_i
 
-    puts "Try to include foreign-language subtitles?"
-    Persist[ :foreign_subs ] = foreign_subs = confirm( Persist[ :foreign_subs ] || false )
+    if media_type == :dvd
 
-    puts "Apply motion-sensing decomb filter (for video-based sources)?"
-    Persist[ :decomb ] = decomb = choose([
-      'Off',
-      'Automatic',
-      'Upper field first (NTSC)',
-      'Lower field first (PAL)'
-    ], Persist[ :decomb ] || 1)
+      puts "Try to include foreign-language subtitles?"
+      Persist[ :foreign_subs ] = foreign_subs = confirm( Persist[ :foreign_subs ] || false )
+
+      puts "Apply motion-sensing decomb filter (for video-based sources)?"
+      Persist[ :decomb ] = decomb = choose([
+        'Off',
+        'Automatic',
+        'Upper field first (NTSC)',
+        'Lower field first (PAL)'
+      ], Persist[ :decomb ] || 1)
+
+    end
 
     if Iflicks.installed?
       puts "Add episodes to iFlicks?"
@@ -269,11 +290,20 @@ class Disc
 
     StringIO.new( `df -l` ).each_line do |line|
       volume = line[ /\/Volumes\/(.*)/, 1 ]
-      ret << volume unless volume.nil? or !File.directory? '/Volumes/%s/VIDEO_TS' % volume
+      ret << volume unless volume.nil? or !media_type '/Volumes/' + volume
     end
 
     ret
     
+  end
+
+  def self.media_type volume
+
+    path = File.expand_path volume
+
+    return :dvd if File.directory? path + '/VIDEO_TS'
+    return :bluray if File.directory? path + '/BDMV'
+
   end
 
   def initialize volume
@@ -288,7 +318,7 @@ class Disc
 
     Handbrake.exec :input => @path, :title => 0, :'min-duration' => Application::MINIMUM_EPISODE_LENGTH do |line|
 
-      self.title_count = line[ /DVD has (\d+) title/, 1 ]
+      self.title_count = line[ /Disc has (\d+) title/, 1 ]
       self.titles_scanned = line[ /Scanning title (\d+) of/, 1 ]
       if line =~ /scan thread found \d+ valid title/
         AnsiEscape.down
@@ -308,6 +338,10 @@ class Disc
 
     end
 
+  end
+
+  def media_type
+    return Disc.media_type @path
   end
 
   def title_count= value
@@ -438,7 +472,9 @@ class Handbrake
   end
 
   def self.rip episode, output_file, options
-    args = Application::ENCODING_DEFAULTS.merge( {
+    args = Application::ENCODING_DEFAULTS[ :common ].merge(
+        Application::ENCODING_DEFAULTS[ episode.disc.media_type ]
+      ).merge( {
       :input => episode.disc.path,
       :title => episode.disc.titles[ episode.title - 1 ].number,
       :output => output_file
