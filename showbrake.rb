@@ -16,6 +16,7 @@ class Application
 
     :common => {
       :encoder => 'x264',
+      :quality => 20,
       :optimize => true,
       :audio => '1,1',
       :aencoder => 'faac,copy:ac3',
@@ -29,13 +30,11 @@ class Application
     },
 
     :dvd => {
-      :quality => 23,
       :maxWidth => 720,
       :encopts => 'cabac=0:ref=2:me=umh:bframes=0:weightp=0:8x8dct=0:trellis=0:subme=6',
     },
 
     :bluray => {
-      :quality => 21.5,
       :maxWidth => 1280,
       :'large-file' => true,
       :rate => 29.97,
@@ -369,7 +368,7 @@ class Disc
     puts 'Disc duration: ' + duration_s
     puts ''
     @titles.each do |title|
-      puts '%s) title       %s' % [ ( title.index + 1 ).to_s.rjust( 2 ), title.duration_s ]
+      puts '%s) title %s %s' % [ ( title.index + 1 ).to_s.rjust( 2 ), title.number.to_s.ljust( 5 ), title.duration_s ]
       title.chapters.each do |chapter|
         puts '  %s) chapter   %s' % [ chapter.number.to_s.rjust( 2 ), chapter.duration_s ]
       end
