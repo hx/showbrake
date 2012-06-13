@@ -198,7 +198,7 @@ module AnsiEscape
     :italic => 3,
     :underline => 4,
     :inverse => 7,
-    :strikethrough => 4
+    :strikethrough => 9
   }
 
   def self.colour args
