@@ -544,4 +544,4 @@ class Persist
 
 end
 
-Application.main
+Application.main if __FILE__ == $0
