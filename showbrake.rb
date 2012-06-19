@@ -317,7 +317,7 @@ class Disc
 
     Handbrake.exec :input => @path, :title => 0, :'min-duration' => Application::MINIMUM_EPISODE_LENGTH do |line|
 
-      self.title_count = line[ /Disc has (\d+) title/, 1 ]
+      self.title_count = line[ /\w+ has (\d+) title/, 1 ]
       self.titles_scanned = line[ /Scanning title (\d+) of/, 1 ]
       if line =~ /scan thread found \d+ valid title/
         AnsiEscape.down
