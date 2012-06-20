@@ -504,6 +504,8 @@ end tell
 
   '.strip.split( "\n" ).map{ |line| " -e '%s'" % line }.join
 
+  @@option = 0
+
   def self.installed?
     File.directory? '/Applications/iFlicks.app'
   end
