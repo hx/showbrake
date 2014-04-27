@@ -3,6 +3,7 @@
 require 'yaml'
 require 'stringio'
 require 'shellwords'
+require 'pathname'
 
 STDOUT.sync = true
 
@@ -121,15 +122,8 @@ class Application
 
     end
 
-    if Iflicks.installed?
-      puts "Add episodes to iFlicks?"
-      options = [
-        'Do not add to iFlicks',
-        'Add to iFlicks, but do not queue',
-        'Add to iFlicks and queue immediately'
-      ]
-      Persist[ :iFlicks ] = Iflicks.option = choose( options, Persist[ :iFlicks ] || 2 )
-    end
+    puts 'Move episodes to ~/Downloads on completion?'
+    Persist[ :copy_to_downloads ] = confirm( Persist[ :copy_to_downloads ] || false )
 
     disc = Disc.new volume
 
@@ -171,7 +165,7 @@ class Application
       filename = '%s S%02dE%02d.mp4' % [ show_title, season, first_episode + index ]
       puts 'Creating %s' % filename
       Handbrake.rip episode, filename, :foreign_subs => foreign_subs, :decomb => decomb
-      Iflicks << File.expand_path( filename )
+      Downloads << File.expand_path( filename ) if Persist[ :copy_to_downloads ]
     end
 
     Persist[ :episode ] = first_episode + episodes.length - 1
@@ -318,7 +312,7 @@ class Disc
     Handbrake.exec :input => @path, :title => 0, :'min-duration' => Application::MINIMUM_EPISODE_LENGTH do |line|
 
       self.title_count = line[ /\w+ has (\d+) title/, 1 ]
-      self.titles_scanned = line[ /Scanning title (\d+) of/, 1 ]
+      self.titles_scanned = line[ /Scanning title (\d+) of \d+, preview/, 1 ]
       if line =~ /scan thread found \d+ valid title/
         AnsiEscape.down
         AnsiEscape.left @titles_scanned + 1
@@ -459,7 +453,7 @@ class Handbrake
     args.each { |key, value| cmd += " --%s %s" % [ key, value == true ? '' : Shellwords.shellescape( value.to_s ) ] if value }
     cmd += ARGV.map{ |x| ' ' + Shellwords.shellescape( x ) }.join unless ARGV.empty?
     if block_given?
-      IO.popen( cmd + ' 2>&1' ).each_line { |line| yield line }
+      IO.popen( cmd + ' 2>&1', external_encoding: 'ASCII-8BIT' ).each_line { |line| yield line }
     elsif display
       AnsiEscape.colour :foreground => :green
       result = system cmd + ' 2> /dev/null'
@@ -494,29 +488,16 @@ class Handbrake
 
 end
 
-class Iflicks
+class Downloads
 
-  COMMAND_TEMPLATE = 'osascript' + '
-
-tell application "iFlicks"
-import "%s" as iTunes compatible with%s gui with deleting
-end tell
-
-  '.strip.split( "\n" ).map{ |line| " -e '%s'" % line }.join
-
-  @@option = 0
-
-  def self.installed?
-    File.directory? '/Applications/iFlicks.app'
-  end
-
-  def self.option= value
-    @@option = value
+  def self.base
+    @base ||= Pathname.new(File.expand_path '~/Downloads').realpath
   end
 
   def self.<< file
-    return if @@option == 0
-    system COMMAND_TEMPLATE % [ file, @@option == 2 ? 'out' : '' ]
+    source = Pathname.new(file)
+    puts "Moving #{source.basename} to #{base}"
+    File.rename source, base + source.basename
   end
 
 end
